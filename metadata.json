@@ -1,0 +1,8 @@
+{
+  "name": "ScreenCapturing Pro",
+  "description": "A simple, aesthetic screen recorder built with React and native Web APIs.",
+  "requestFramePermissions": [
+    "microphone",
+    "display-capture"
+  ]
+}

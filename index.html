@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScreenCapturing Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #DAD7CD;
+        color: #344E41;
+        overflow-x: hidden;
+        min-height: 100vh;
+      }
+      .mesh-gradient {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        background-color: #DAD7CD;
+        background-image: 
+          radial-gradient(at 0% 0%, hsla(132, 23%, 80%, 0.4) 0, transparent 50%), 
+          radial-gradient(at 100% 0%, hsla(90, 20%, 75%, 0.4) 0, transparent 50%), 
+          radial-gradient(at 50% 100%, hsla(166, 20%, 70%, 0.5) 0, transparent 50%);
+        opacity: 1;
+      }
+      /* Custom scrollbar matching the theme */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #588157;
+        border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #3A5A40;
+      }
+      .card-shadow {
+        box-shadow: 0 10px 30px -10px rgba(58, 90, 64, 0.2);
+      }
+
+      /* Animations for Landing Page */
+      .animate-in {
+        animation-duration: 1s;
+        animation-fill-mode: both;
+        animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .fade-in { animation-name: fadeIn; }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+      .zoom-in-50 { animation-name: zoomIn50; }
+      @keyframes zoomIn50 { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+
+      .zoom-in-95 { animation-name: zoomIn95; }
+      @keyframes zoomIn95 { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
+      .slide-in-from-bottom-4 { animation-name: slideUp4; }
+      @keyframes slideUp4 { from { opacity: 0; transform: translateY(1rem); } to { opacity: 1; transform: translateY(0); } }
+
+      .slide-in-from-bottom-6 { animation-name: slideUp6; }
+      @keyframes slideUp6 { from { opacity: 0; transform: translateY(1.5rem); } to { opacity: 1; transform: translateY(0); } }
+      
+      .slide-in-from-bottom-8 { animation-name: slideUp8; }
+      @keyframes slideUp8 { from { opacity: 0; transform: translateY(2rem); } to { opacity: 1; transform: translateY(0); } }
+
+      .delay-100 { animation-delay: 100ms; }
+      .delay-200 { animation-delay: 200ms; }
+      .delay-300 { animation-delay: 300ms; }
+      .delay-500 { animation-delay: 500ms; }
+
+      #error-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(58, 90, 64, 0.95);
+        color: #DAD7CD;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        z-index: 9999;
+        padding: 2rem;
+        text-align: center;
+      }
+    </style>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        const overlay = document.getElementById('error-overlay');
+        const msg = document.getElementById('error-message');
+        if (overlay && msg) {
+            overlay.style.display = 'flex';
+            msg.textContent = message;
+        }
+        console.error("Global Error:", error);
+      };
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react": "https://esm.sh/react@18.3.1",
+    "lucide-react": "https://esm.sh/lucide-react@0.344.0",
+    "@ffmpeg/ffmpeg": "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/+esm",
+    "@ffmpeg/util": "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/+esm",
+    "dom": "https://esm.sh/dom@^0.0.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div class="mesh-gradient"></div>
+    <div id="root"></div>
+    <div id="error-overlay">
+      <h2 style="font-size: 2rem; font-weight: 900; margin-bottom: 1rem;">Startup Error</h2>
+      <p id="error-message" style="font-family: monospace; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 0.5rem;"></p>
+      <button onclick="window.location.reload()" style="margin-top: 2rem; padding: 0.5rem 1rem; background: #DAD7CD; color: #344E41; border: none; border-radius: 0.5rem; font-weight: bold; cursor: pointer;">Reload</button>
+    </div>
+  </body>
+</html>
