@@ -16,7 +16,7 @@ const META_KEY = 'vibe_recordings_meta';
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
-    
+
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -36,14 +36,14 @@ export const saveRecordingToStorage = async (blob: Blob, name?: string): Promise
     name: name || `Recording ${new Date().toLocaleString()}`,
     timestamp: Date.now(),
     size: blob.size,
-    mimeType: blob.type,
+    mimeType: blob.type || 'video/webm', // Default to video/webm if type is empty
   };
 
   // Save Blob to IndexedDB
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
-  
+
   await new Promise<void>((resolve, reject) => {
     const request = store.put(blob, id);
     request.onsuccess = () => resolve();
@@ -91,7 +91,7 @@ export const deleteRecording = async (id: string): Promise<void> => {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
-  
+
   await new Promise<void>((resolve, reject) => {
     const request = store.delete(id);
     request.onsuccess = () => resolve();
