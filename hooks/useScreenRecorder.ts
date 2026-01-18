@@ -354,11 +354,15 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         setMediaStream(stream);
       }
 
+      // Check if we actually have audio tracks
+      const hasAudio = recordingStream.getAudioTracks().length > 0;
+      console.log('[Recording] Has audio tracks:', hasAudio);
+
       // Robust MIME type selection
       const getSupportedMimeType = () => {
         const types = [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus',
+          hasAudio ? 'video/webm;codecs=vp9,opus' : 'video/webm;codecs=vp9',
+          hasAudio ? 'video/webm;codecs=vp8,opus' : 'video/webm;codecs=vp8',
           'video/webm',
           'video/mp4'
         ];
