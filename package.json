@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "dom": "^0.0.3",
     "gif.js": "^0.2.0",
     "lucide-react": "0.344.0",

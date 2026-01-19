@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { RefreshCcw, Check, Download, Save, X, Scissors, PlayCircle, Loader2 } from 'lucide-react';
 import { Button } from './Button';
 
@@ -19,7 +19,71 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   onSaveAndEdit,
   isSaving
 }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
   const isValidBlob = currentBlob && currentBlob.size > 0;
+
+  // Effect to handle video loading when blob URL changes
+  useEffect(() => {
+    if (!mediaBlobUrl || !videoRef.current || !isValidBlob) return;
+
+    const video = videoRef.current;
+    setIsVideoLoading(true);
+    setVideoError(null);
+
+    console.log('[ReviewModal] Loading video from blob URL:', mediaBlobUrl);
+    console.log('[ReviewModal] Blob size:', currentBlob.size, 'bytes');
+    console.log('[ReviewModal] Blob type:', currentBlob.type);
+
+    // Reset video element state
+    video.pause();
+    video.currentTime = 0;
+
+    // Set source and explicitly call load()
+    video.src = mediaBlobUrl;
+    video.load();
+
+    const handleLoadedData = () => {
+      console.log('[ReviewModal] Video loaded successfully');
+      console.log('[ReviewModal] Video duration:', video.duration, 'seconds');
+      console.log('[ReviewModal] Video dimensions:', video.videoWidth, 'x', video.videoHeight);
+      setIsVideoLoading(false);
+
+      // Attempt to play after loading
+      video.play().catch(err => {
+        console.warn('[ReviewModal] Autoplay blocked:', err);
+        // Autoplay might be blocked, that's OK - user can click play
+      });
+    };
+
+    const handleError = () => {
+      console.error('[ReviewModal] Video load error:', video.error);
+      setIsVideoLoading(false);
+      setVideoError(`Video failed to load: ${video.error?.message || 'Unknown error'}`);
+    };
+
+    const handleWaiting = () => {
+      console.log('[ReviewModal] Video buffering...');
+    };
+
+    const handleCanPlay = () => {
+      console.log('[ReviewModal] Video can play');
+    };
+
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('error', handleError);
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('canplay', handleCanPlay);
+
+    return () => {
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('error', handleError);
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('canplay', handleCanPlay);
+    };
+  }, [mediaBlobUrl, currentBlob, isValidBlob]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
@@ -47,19 +111,31 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
               <p className="text-[#A3B18A] text-lg mb-2">⚠️ Recording data is invalid</p>
               <p className="text-[#588157] text-sm">The recording may have been corrupted. Please try recording again.</p>
             </div>
+          ) : videoError ? (
+            <div className="text-center">
+              <p className="text-rose-400 text-lg mb-2">⚠️ Video playback error</p>
+              <p className="text-[#588157] text-sm">{videoError}</p>
+              <p className="text-[#588157] text-xs mt-2">Try downloading the file directly - it may still be valid.</p>
+            </div>
           ) : (
-            <video
-              src={mediaBlobUrl}
-              controls
-              autoPlay
-              muted
-              playsInline
-              onError={(e) => {
-                const videoElement = e.currentTarget;
-                console.error('[ReviewModal] Video error:', videoElement.error);
-              }}
-              className="max-w-full max-h-full object-contain rounded-2xl shadow-xl"
-            />
+            <>
+              {isVideoLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-[#344E41]/80 z-10">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 size={32} className="animate-spin text-[#DAD7CD]" />
+                    <p className="text-[#A3B18A] text-sm font-medium">Loading video...</p>
+                  </div>
+                </div>
+              )}
+              <video
+                ref={videoRef}
+                controls
+                muted
+                playsInline
+                loop
+                className="max-w-full max-h-full object-contain rounded-2xl shadow-xl"
+              />
+            </>
           )}
         </div>
 
@@ -77,11 +153,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             <a
               href={mediaBlobUrl}
               download={`vibe-recording-${Date.now()}.${currentBlob.type.includes('mp4') ? 'mp4' : 'webm'}`}
-              className="hidden sm:block"
+              className="p-4 bg-[#344E41] text-[#A3B18A] hover:text-[#DAD7CD] hover:bg-[#588157] rounded-2xl transition-all border border-[#588157] inline-flex items-center justify-center"
             >
-              <button className="p-4 bg-[#344E41] text-[#A3B18A] hover:text-[#DAD7CD] hover:bg-[#588157] rounded-2xl transition-all border border-[#588157]">
-                <Download size={22} />
-              </button>
+              <Download size={22} />
             </a>
 
             <Button

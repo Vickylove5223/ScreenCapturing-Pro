@@ -15,7 +15,7 @@ import { SettingsPage } from './components/SettingsPage';
 import {
   Download, Monitor, Square, RefreshCcw, Save, Loader2, Sparkles, PlusCircle,
   Zap, Shield, Wand2, Share2, Play, Code2, GraduationCap, Users, Check,
-  ArrowRight, Star, Globe, MessageSquare, ChevronDown, Scissors, Music, Cloud, CheckCircle
+  ArrowRight, Star, Globe, MessageSquare, ChevronDown, Scissors, Music, Cloud, CheckCircle, X
 } from 'lucide-react';
 import {
   saveRecordingToStorage,
@@ -50,6 +50,7 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const timeLimitRef = useRef<number | null>(null);
+  const countdownTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     refreshLibrary();
@@ -75,6 +76,25 @@ export default function App() {
       timeLimitRef.current = null;
     }
   }, [status]);
+
+  // Cleanup countdown timer on unmount or when modal closes
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Clear countdown when modal closes
+  useEffect(() => {
+    if (!isModalOpen && countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+      setCountdownValue(null);
+    }
+  }, [isModalOpen]);
 
   const refreshLibrary = () => {
     setRecordings(getRecordingList());
@@ -173,17 +193,25 @@ export default function App() {
     };
 
     if (options.countdown) {
+      // Clear any existing countdown timer
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+      
       setCountdownValue(3);
       const timer = setInterval(() => {
         setCountdownValue(prev => {
           if (prev === 1) {
             clearInterval(timer);
+            countdownTimerRef.current = null;
             startFn();
             return null;
           }
           return (prev || 0) - 1;
         });
       }, 1000);
+      countdownTimerRef.current = timer;
     } else {
       startFn();
     }
@@ -205,9 +233,25 @@ export default function App() {
           <div className="w-full flex-1 flex flex-col items-center justify-center animate-in fade-in duration-1000">
             {/* ERROR MESSAGE */}
             {error && (
-              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[60] bg-rose-500/10 border border-rose-500/20 text-rose-500 px-8 py-4 rounded-[2rem] text-center backdrop-blur-sm shadow-sm">
-                <p className="font-bold mb-1 text-sm uppercase tracking-widest">Capture Error</p>
-                <p className="text-xs font-medium opacity-80">{error}</p>
+              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[60] bg-rose-500/10 border border-rose-500/20 text-rose-500 px-8 py-4 rounded-[2rem] text-center backdrop-blur-sm shadow-sm max-w-md animate-in fade-in duration-300">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <p className="font-bold mb-1 text-sm uppercase tracking-widest">Capture Error</p>
+                    <p className="text-xs font-medium opacity-80 mb-2">{error}</p>
+                    {error.includes('Permission denied') && (
+                      <p className="text-[10px] font-medium opacity-70 mt-2">
+                        💡 Tip: Check browser permissions (lock icon in address bar) or try refreshing the page
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => resetRecording()}
+                    className="text-rose-500/60 hover:text-rose-500 ml-2 mt-1 flex-shrink-0"
+                    aria-label="Dismiss error"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
             )}
 

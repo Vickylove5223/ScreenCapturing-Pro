@@ -28,7 +28,66 @@ class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     this.setState({ errorInfo });
+    
+    // Log error for debugging (in production, you might want to send to error tracking service)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error details:', {
+        error: error.toString(),
+        stack: error.stack,
+        componentStack: errorInfo.componentStack,
+      });
+    }
   }
+
+  componentDidMount() {
+    // Catch unhandled promise rejections
+    window.addEventListener('unhandledrejection', this.handleUnhandledRejection);
+    // Catch unhandled errors
+    window.addEventListener('error', this.handleGlobalError);
+  }
+
+  componentWillUnmount() {
+    // Cleanup event listeners
+    window.removeEventListener('unhandledrejection', this.handleUnhandledRejection);
+    window.removeEventListener('error', this.handleGlobalError);
+  }
+
+  handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+    console.error('Unhandled promise rejection:', event.reason);
+    const error = event.reason instanceof Error 
+      ? event.reason 
+      : new Error(String(event.reason || 'Unhandled promise rejection'));
+    
+    if (!this.state.hasError) {
+      this.setState({
+        hasError: true,
+        error,
+        errorInfo: {
+          componentStack: 'Unhandled Promise Rejection',
+        } as ErrorInfo,
+      });
+    }
+    
+    // Prevent default browser behavior
+    event.preventDefault();
+  };
+
+  handleGlobalError = (event: ErrorEvent) => {
+    console.error('Global error caught:', event.error);
+    const error = event.error instanceof Error 
+      ? event.error 
+      : new Error(event.message || 'Unknown error');
+    
+    if (!this.state.hasError) {
+      this.setState({
+        hasError: true,
+        error,
+        errorInfo: {
+          componentStack: `At: ${event.filename}:${event.lineno}:${event.colno}`,
+        } as ErrorInfo,
+      });
+    }
+  };
 
   handleReload = () => {
     window.location.reload();

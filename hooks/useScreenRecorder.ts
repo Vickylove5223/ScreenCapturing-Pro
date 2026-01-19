@@ -299,6 +299,11 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         const drawFrame = () => {
           if (!canvasRef.current || !videoElementRef.current) return;
 
+          // ARCHITECTURAL SECRET: Canvas "Heartbeat" (0.001 opacity pixel)
+          // Prevents Chrome from "sleeping" the tab or optimizing the video into a static image during long pauses.
+          ctx.fillStyle = 'rgba(0,0,0,0.001)';
+          ctx.fillRect(0, 0, 1, 1);
+
           // Draw background
           if (bgImage) {
             ctx.drawImage(bgImage, 0, 0, canvasWidth, canvasHeight);
@@ -414,6 +419,14 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       mediaRecorder.onstop = () => {
         console.log('[Recording] Stopped. Total chunks:', chunksRef.current.length);
 
+        // Log each chunk for debugging
+        let totalBytes = 0;
+        chunksRef.current.forEach((chunk, i) => {
+          console.log(`[Recording] Chunk ${i}: ${chunk.size} bytes, type: ${chunk.type}`);
+          totalBytes += chunk.size;
+        });
+        console.log('[Recording] Total raw bytes collected:', totalBytes);
+
         // Validate that we have data
         if (chunksRef.current.length === 0) {
           console.error('[Recording] No data chunks collected!');
@@ -441,6 +454,21 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             cleanupStream();
             return;
           }
+
+          // Extra validation: read first few bytes to check for valid video container signature
+          const reader = new FileReader();
+          reader.onload = () => {
+            const arr = new Uint8Array(reader.result as ArrayBuffer);
+            // WebM files start with 0x1A, 0x45, 0xDF, 0xA3 (EBML header)
+            const isWebM = arr[0] === 0x1A && arr[1] === 0x45 && arr[2] === 0xDF && arr[3] === 0xA3;
+            console.log('[Recording] Blob header bytes:', Array.from(arr.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+            console.log('[Recording] Is valid WebM:', isWebM);
+
+            if (!isWebM) {
+              console.warn('[Recording] Blob does not appear to be a valid WebM file. This may cause playback issues.');
+            }
+          };
+          reader.readAsArrayBuffer(blob.slice(0, 8));
 
           // Create object URL
           const url = URL.createObjectURL(blob);

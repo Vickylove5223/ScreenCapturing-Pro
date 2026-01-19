@@ -1,61 +1,43 @@
-/** Fix: Added DOM library reference to resolve missing browser global properties */
-/// <reference lib="dom" />
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
 
-// @ts-ignore
-import GIF from 'gif.js';
+// Singleton FFmpeg instance
+let ffmpeg: FFmpeg | null = null;
 
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+const loadFFmpeg = async () => {
+  if (ffmpeg) return ffmpeg;
 
-export interface VideoLayout {
-  canvasSize: { width: number; height: number };
-  // sourceRect is used for cropping the input video (Zoom/Pan)
-  sourceRect?: Rect;
-  // destRect is where the cropped video is placed on the canvas
-  destRect?: Rect;
-}
+  const ffmpegInstance = new FFmpeg();
 
-export interface VideoSegment {
-  id: string;
-  start: number;
-  end: number;
-}
+  // Load FFmpeg (requires internet initially to fetch wasm)
+  // We use the default CDN setup for simplicity
+  await ffmpegInstance.load({
+    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/ffmpeg-core.js',
+    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/ffmpeg-core.wasm',
+  });
 
-export interface ProcessOptions {
-  blob: Blob;
-  segments: VideoSegment[];
-  videoVolume: number;
-  musicVolume: number;
-  playbackSpeed: number;
-  // Layout handles zoom/crop
-  layout?: VideoLayout;
-  targetResolution?: { width: number; height: number };
-  addedAudioBlob?: Blob;
-  addedAudioUrl?: string;
-  format?: 'webm' | 'mp4' | 'gif';
-  onProgress: (progress: number) => void;
-  hasAudioTrack?: boolean;
-}
-
-// Dummy export to prevent breaking imports of helper functions
-export const preloadFFmpeg = async (): Promise<boolean> => {
-  return true;
+  ffmpeg = ffmpegInstance;
+  return ffmpeg;
 };
 
-export const isFFmpegReady = (): boolean => true;
+export const preloadFFmpeg = async (): Promise<boolean> => {
+  try {
+    await loadFFmpeg();
+    return true;
+  } catch (e) {
+    console.error("Failed to preload FFmpeg", e);
+    return false;
+  }
+};
 
-// Helper to keep format signature even if unused
+export const isFFmpegReady = (): boolean => !!ffmpeg;
+
 export const downscaleImageBlob = async (blob: Blob, maxSize = 1920): Promise<Blob> => {
   return blob;
 };
 
 /**
- * Native video processing using MediaRecorder, Canvas, and Web Audio API.
- * Replaces FFmpeg for a lighter, more stable export experience.
+ * Native video processing using MediaRecorder for video, and FFmpeg.wasm for GIF.
  */
 export const processVideo = async (options: ProcessOptions): Promise<Blob> => {
   const {
@@ -76,262 +58,222 @@ export const processVideo = async (options: ProcessOptions): Promise<Blob> => {
     throw new Error("No video segments selected for export.");
   }
 
-  // 1. Setup Canvas for Video Manipulation (Crop/Resize)
+  // -------------------------------------------------------------------------
+  // STEP 1: RENDER TO WEBM FIRST (Standardize Input)
+  // -------------------------------------------------------------------------
+  // We need a clean video file to pass to FFmpeg or to return as the final videoResult.
+  // We reuse the existing canvas/MediaRecorder logic to burn in effects/edits first.
+
+  // Setup Canvas
   const canvas = document.createElement('canvas');
-  // Determine output size
   const outputWidth = targetResolution?.width || 1920;
   const outputHeight = targetResolution?.height || 1080;
   canvas.width = outputWidth;
   canvas.height = outputHeight;
-  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: format === 'gif' }); // Optimization
-
+  const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error("Failed to create canvas context");
 
-  // 2. Setup Resources (Video Source, Audio Elements)
+  // Setup Resources
   const video = document.createElement('video');
   video.src = URL.createObjectURL(blob);
-  video.muted = true; // We mix audio separately to avoid feedback/echo
+  video.muted = true;
   video.crossOrigin = "anonymous";
   video.playbackRate = playbackSpeed;
 
-  // Wait for video metadata
   await new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => resolve();
     video.onerror = () => reject(new Error("Failed to load input video"));
   });
 
-  // Calculate layout logic once
+  // Layout
   const sourceRect = layout?.sourceRect || { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight };
-
-  // Calculate destination rect on the output canvas (Letterboxing/Fit)
   const scale = Math.min(outputWidth / sourceRect.width, outputHeight / sourceRect.height);
   const drawnWidth = sourceRect.width * scale;
   const drawnHeight = sourceRect.height * scale;
   const drawnX = (outputWidth - drawnWidth) / 2;
   const drawnY = (outputHeight - drawnHeight) / 2;
 
-  // 3. Audio Construction (Web Audio API)
-  // Only relevant for video formats
-  let audioCtx: AudioContext | null = null;
-  let dest: MediaStreamAudioDestinationNode | null = null;
+  // Audio mixing setup (only needed if NOT gif, but we do it to create the intermediate blob correctly)
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  const audioCtx = new AudioContextClass();
+  const dest = audioCtx.createMediaStreamDestination();
   let musicElement: HTMLAudioElement | null = null;
 
-  if (format !== 'gif') {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    audioCtx = new AudioContextClass();
-    dest = audioCtx.createMediaStreamDestination();
+  // Video Audio
+  const videoSource = audioCtx.createMediaElementSource(video);
+  const videoGain = audioCtx.createGain();
+  videoGain.gain.value = videoVolume;
+  videoSource.connect(videoGain).connect(dest);
 
-    // Video Audio Source
-    const videoSource = audioCtx.createMediaElementSource(video);
-    const videoGain = audioCtx.createGain();
-    videoGain.gain.value = videoVolume;
-    videoSource.connect(videoGain).connect(dest);
-
-    // Background Music Source (if any)
-    if (addedAudioBlob || addedAudioUrl) {
-      musicElement = new Audio();
-      musicElement.crossOrigin = "anonymous";
-      musicElement.loop = true; // Background music usually loops
-      musicElement.playbackRate = playbackSpeed; // Sync speed
-
-      if (addedAudioBlob) {
-        musicElement.src = URL.createObjectURL(addedAudioBlob);
-      } else if (addedAudioUrl) {
-        musicElement.src = addedAudioUrl;
-      }
-
-      // Wait for music to be loadable
-      try {
-        await new Promise<void>((resolve, reject) => {
-          if (!musicElement) return resolve();
-          musicElement.onloadedmetadata = () => resolve();
-          musicElement.onerror = () => {
-            console.warn("Failed to load music, skipping.");
-            musicElement = null;
-            resolve(); // Don't fail export
-          };
-        });
-      } catch (e) { console.warn("Music load error", e); }
-
-      if (musicElement) {
-        const musicSource = audioCtx.createMediaElementSource(musicElement);
-        const musicGain = audioCtx.createGain();
-        musicGain.gain.value = musicVolume;
-        musicSource.connect(musicGain).connect(dest);
-      }
+  // Music
+  if (addedAudioBlob || addedAudioUrl) {
+    musicElement = new Audio();
+    musicElement.crossOrigin = "anonymous";
+    musicElement.loop = true;
+    musicElement.playbackRate = playbackSpeed;
+    musicElement.src = addedAudioBlob ? URL.createObjectURL(addedAudioBlob) : addedAudioUrl!;
+    try {
+      await new Promise<void>((resolve) => {
+        musicElement!.onloadedmetadata = () => resolve();
+        musicElement!.onerror = () => { musicElement = null; resolve(); };
+      });
+    } catch (e) { }
+    if (musicElement) {
+      const musicSource = audioCtx.createMediaElementSource(musicElement);
+      const musicGain = audioCtx.createGain();
+      musicGain.gain.value = musicVolume;
+      musicSource.connect(musicGain).connect(dest);
     }
   }
 
-  // 4. Processing Loop Setup
+  // Render Steps
+  const intermediateChunks: Blob[] = [];
+  // If GIF, we don't strictly need audio in the intermediate, BUT keeping it generic is safer.
+  // However, FFmpeg for GIF ignores audio.
+  const canvasStream = canvas.captureStream(30);
+  const combinedStream = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...(dest.stream.getAudioTracks())
+  ]);
+
+  const intermediateRecorder = new MediaRecorder(combinedStream, {
+    mimeType: 'video/webm;codecs=vp8', // VP8 is safer for generic FFmpeg/Browser compatibility
+    videoBitsPerSecond: 25000000
+  });
+
+  intermediateRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) intermediateChunks.push(e.data);
+  };
+
   const sortedSegments = [...segments].sort((a, b) => a.start - b.start);
   const totalDuration = sortedSegments.reduce((acc, s) => acc + (s.end - s.start), 0);
   let processedDuration = 0;
 
-  // --- GIF VS VIDEO PATH ---
-
-  if (format === 'gif') {
-    // GIF EXPORT
-    return new Promise(async (resolve, reject) => {
-      try {
-        const gif = new GIF({
-          workers: 4,
-          quality: 10,
-          width: outputWidth,
-          height: outputHeight,
-          workerScript: '/gif.worker.js'
-        });
-
-        gif.on('finished', (blob: Blob) => {
-          resolve(blob);
-        });
-
-        const fps = 10; // Reduce FPS for GIF to keep size manageable and speed reasonable
-        const frameInterval = 1 / fps;
-
-        for (const segment of sortedSegments) {
-          let currentTime = segment.start;
-          while (currentTime < segment.end) {
-            video.currentTime = currentTime;
-            await new Promise<void>(r => {
-              const onSeek = () => { video.removeEventListener('seeked', onSeek); r(); };
-              video.addEventListener('seeked', onSeek);
-            });
-
-            // Draw frame
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, outputWidth, outputHeight);
-            ctx.drawImage(
-              video,
-              sourceRect.x, sourceRect.y, sourceRect.width, sourceRect.height,
-              drawnX, drawnY, drawnWidth, drawnHeight
-            );
-
-            gif.addFrame(ctx, { copy: true, delay: (1000 / fps) / playbackSpeed });
-
-            const totalProgress = (processedDuration + (currentTime - segment.start)) / totalDuration;
-            onProgress(totalProgress * 0.8); // Rendering is 80%, encoding is 20%
-
-            currentTime += frameInterval * playbackSpeed;
-          }
-          processedDuration += (segment.end - segment.start);
-        }
-
-        onProgress(0.8);
-        console.log("GIF Rendering 100%, now encoding...");
-        gif.render(); // Start encoding
-
-      } catch (err) {
-        reject(err);
-      }
-    });
-  } else {
-    // VIDEO EXPORT (WebM/MP4)
-    const canvasStream = canvas.captureStream(30); // 30 FPS
-
-    const combinedStream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...(dest ? dest.stream.getAudioTracks() : [])
-    ]);
-
-    // High Quality Bitrates
-    // 4K: 50 Mbps, 1080p: 25 Mbps, 720p: 8 Mbps
-    let bitrate = 25000000;
-    if (outputWidth >= 3840) bitrate = 50000000;
-    else if (outputWidth <= 1280) bitrate = 8000000;
-
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
-
-    const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType,
-      videoBitsPerSecond: bitrate
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
+  // Wait for intermediate render
+  const intermediateBlob = await new Promise<Blob>(async (resolve, reject) => {
+    intermediateRecorder.onstop = () => {
+      resolve(new Blob(intermediateChunks, { type: 'video/webm' }));
     };
+    intermediateRecorder.onerror = (e) => reject(e);
 
-    return new Promise(async (resolve, reject) => {
+    intermediateRecorder.start(100);
 
-      recorder.onstop = async () => {
-        // Cleanup
-        URL.revokeObjectURL(video.src);
-        if (musicElement) URL.revokeObjectURL(musicElement.src);
-        if (audioCtx) audioCtx.close();
-
-        // Final Blob
-        const finalBlob = new Blob(chunks, { type: mimeType });
-        resolve(finalBlob);
-      };
-
-      recorder.onerror = (e) => reject(e);
-
-      // Start Recording
-      recorder.start(100);
-
-      // Draw Loop
-      let stopDrawing = false;
-      const draw = () => {
-        if (stopDrawing) return;
-
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, outputWidth, outputHeight);
-
-        ctx.drawImage(
-          video,
-          sourceRect.x, sourceRect.y, sourceRect.width, sourceRect.height,
-          drawnX, drawnY, drawnWidth, drawnHeight
-        );
-
-        requestAnimationFrame(draw);
-      };
-
+    // Draw Loop
+    let stopDrawing = false;
+    const draw = () => {
+      if (stopDrawing) return;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, outputWidth, outputHeight);
+      ctx.drawImage(video, sourceRect.x, sourceRect.y, sourceRect.width, sourceRect.height, drawnX, drawnY, drawnWidth, drawnHeight);
       requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
 
-      try {
-        for (const segment of sortedSegments) {
+    try {
+      for (const segment of sortedSegments) {
+        if (intermediateRecorder.state === 'recording') intermediateRecorder.pause();
+        if (musicElement) musicElement.pause();
 
-          if (recorder.state === 'recording') recorder.pause();
-          if (musicElement) musicElement.pause();
+        video.currentTime = segment.start;
+        await new Promise<void>(r => {
+          const onSeek = () => { video.removeEventListener('seeked', onSeek); r(); };
+          video.addEventListener('seeked', onSeek);
+        });
 
-          video.currentTime = segment.start;
-          await new Promise<void>(r => {
-            const onSeek = () => { video.removeEventListener('seeked', onSeek); r(); };
-            video.addEventListener('seeked', onSeek);
-          });
+        if (intermediateRecorder.state === 'paused') intermediateRecorder.resume();
+        if (musicElement) musicElement.play();
+        await video.play();
 
-          if (recorder.state === 'paused') recorder.resume();
-          if (musicElement) musicElement.play();
-
-          await video.play();
-
-          await new Promise<void>(r => {
-            const checkTime = () => {
-              if (video.currentTime >= segment.end || video.paused || video.ended) {
-                video.removeEventListener('timeupdate', checkTime);
-                r();
-              } else {
-                const currentSegmentProgress = video.currentTime - segment.start;
-                const totalProgress = (processedDuration + currentSegmentProgress) / totalDuration;
-                onProgress(Math.min(0.99, totalProgress));
-              }
-            };
-            video.addEventListener('timeupdate', checkTime);
-          });
-
-          video.pause();
-          processedDuration += (segment.end - segment.start);
-        }
-
-        stopDrawing = true;
-        recorder.stop();
-        onProgress(1);
-
-      } catch (err) {
-        stopDrawing = true;
-        recorder.stop();
-        reject(err);
+        await new Promise<void>(r => {
+          const checkTime = () => {
+            if (video.currentTime >= segment.end || video.paused || video.ended) {
+              video.removeEventListener('timeupdate', checkTime);
+              r();
+            } else {
+              const prog = (processedDuration + (video.currentTime - segment.start)) / totalDuration;
+              // If exporting GIF, this is Phase 1 (50% progress)
+              // If exporting Video, this is Phase 1 (100% progress)
+              onProgress(format === 'gif' ? prog * 0.5 : prog);
+            }
+          };
+          video.addEventListener('timeupdate', checkTime);
+        });
+        video.pause();
+        processedDuration += (segment.end - segment.start);
       }
-    });
+      stopDrawing = true;
+      intermediateRecorder.stop();
+    } catch (e) {
+      stopDrawing = true;
+      intermediateRecorder.stop();
+      reject(e);
+    }
+  });
+
+  // Cleanup Audio/Resources
+  audioCtx.close();
+  URL.revokeObjectURL(video.src);
+  if (musicElement) URL.revokeObjectURL(musicElement.src);
+
+
+  // -------------------------------------------------------------------------
+  // STEP 2: FINALIZE (Return Blob OR Convert to GIF)
+  // -------------------------------------------------------------------------
+
+  if (format !== 'gif') {
+    // If user wanted video, we are done!
+    onProgress(1);
+    return intermediateBlob;
   }
+
+  // -------------------------------------------------------------------------
+  // STEP 3: CONVERT TO GIF (FFmpeg)
+  // -------------------------------------------------------------------------
+  console.log("Loading FFmpeg for GIF conversion...");
+  const ff = await loadFFmpeg();
+
+  onProgress(0.6); // Loaded
+
+  const inputName = 'input.webm';
+  const outputName = 'output.gif';
+  const paletteName = 'palette.png';
+
+  // Write input file to FS
+  await ff.writeFile(inputName, await fetchFile(intermediateBlob));
+
+  onProgress(0.7);
+
+  // 1. Generate Palette (Better quality)
+  // ffmpeg -i input.webm -vf "fps=15,scale=...:flags=lanczos,palettegen" -y palette.png
+  console.log("Generating GIF palette...");
+  await ff.exec([
+    '-i', inputName,
+    '-vf', `fps=15,scale=${outputWidth}:-1:flags=lanczos,palettegen`,
+    '-y', paletteName
+  ]);
+
+  onProgress(0.8);
+
+  // 2. Generate GIF using Palette
+  // ffmpeg -i input.webm -i palette.png -filter_complex "fps=15,scale=...:flags=lanczos[x];[x][1:v]paletteuse" -y output.gif
+  console.log("Encoding GIF...");
+  await ff.exec([
+    '-i', inputName,
+    '-i', paletteName,
+    '-filter_complex', `fps=15,scale=${outputWidth}:-1:flags=lanczos[x];[x][1:v]paletteuse`,
+    '-y', outputName
+  ]);
+
+  onProgress(0.9);
+
+  // Read result
+  const data = await ff.readFile(outputName);
+
+  // Cleanup FS
+  await ff.deleteFile(inputName);
+  await ff.deleteFile(outputName);
+  await ff.deleteFile(paletteName);
+
+  onProgress(1);
+  return new Blob([data], { type: 'image/gif' });
 };
